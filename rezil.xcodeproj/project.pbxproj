@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000002 /* GoogleSignIn */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		5CA734B9304AB59E009C5CFE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000001 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = rezil;
 			packageProductDependencies = (
+				A10000000000000000000002 /* GoogleSignIn */,
 			);
 			productName = rezil;
 			productReference = 5CA734AB304AB59D009C5CFE /* rezil.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 5CA734A2304AB59D009C5CFE;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000003 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5CA734AC304AB59D009C5CFE /* Products */;
 			projectDirPath = "";
@@ -399,7 +408,17 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K4T4X4Q9XU;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_CLIENT_ID = "307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j.apps.googleusercontent.com";
+				GOOGLE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j";
+				GOOGLE_SERVER_CLIENT_ID = "307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j.apps.googleusercontent.com";
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Çevrendeki sorunu fotoğraflayarak bildirebilmen için kamera erişimi gerekir.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Şikâyeti haritada doğru noktaya bırakabilmen için konumuna erişim gerekir.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Şikâyetine galerinden fotoğraf ekleyebilmen için fotoğraf erişimi gerekir.";
+				INFOPLIST_KEY_SUPABASE_ANON_KEY = "$(SUPABASE_ANON_KEY)";
+				INFOPLIST_KEY_SUPABASE_URL = "$(SUPABASE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -413,6 +432,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.manyasli.rezil;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = sb_publishable_tsOMrVVzmvtxjZ6QERq1DA__Rvtsabv;
+				SUPABASE_URL = "https://uzpwavbizulegehuysuu.supabase.co";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -431,7 +452,17 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K4T4X4Q9XU;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_CLIENT_ID = "307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j.apps.googleusercontent.com";
+				GOOGLE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j";
+				GOOGLE_SERVER_CLIENT_ID = "307313870026-pnultr4pcknekjga5gvdgi3j401j7h0j.apps.googleusercontent.com";
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Çevrendeki sorunu fotoğraflayarak bildirebilmen için kamera erişimi gerekir.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Şikâyeti haritada doğru noktaya bırakabilmen için konumuna erişim gerekir.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Şikâyetine galerinden fotoğraf ekleyebilmen için fotoğraf erişimi gerekir.";
+				INFOPLIST_KEY_SUPABASE_ANON_KEY = "$(SUPABASE_ANON_KEY)";
+				INFOPLIST_KEY_SUPABASE_URL = "$(SUPABASE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -445,6 +476,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.manyasli.rezil;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = sb_publishable_tsOMrVVzmvtxjZ6QERq1DA__Rvtsabv;
+				SUPABASE_URL = "https://uzpwavbizulegehuysuu.supabase.co";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -578,6 +611,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000003 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000002 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000003 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5CA734A3304AB59D009C5CFE /* Project object */;
 }

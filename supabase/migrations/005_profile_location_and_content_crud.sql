@@ -1,0 +1,17 @@
+alter table public.profiles add column if not exists home_country text;
+drop policy if exists "users update their own reports" on public.reports;
+drop policy if exists "users delete their own reports" on public.reports;
+drop policy if exists "users update their own comments" on public.comments;
+drop policy if exists "users delete their own comments" on public.comments;
+create policy "users update their own reports" on public.reports for update to authenticated using (author_id = auth.uid()) with check (author_id = auth.uid());
+create policy "users delete their own reports" on public.reports for delete to authenticated using (author_id = auth.uid());
+create policy "users update their own comments" on public.comments for update to authenticated using (author_id = auth.uid()) with check (author_id = auth.uid());
+create policy "users delete their own comments" on public.comments for delete to authenticated using (author_id = auth.uid());
+drop trigger if exists comments_count on public.comments;
+create trigger comments_count after insert or update of deleted_at or delete on public.comments for each row execute procedure public.refresh_comment_counts();
+insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true) on conflict (id) do nothing;
+update storage.buckets set public = true where id in ('avatars', 'report-images');
+drop policy if exists "users upload their own avatar" on storage.objects;
+drop policy if exists "users update their own avatar" on storage.objects;
+create policy "users upload their own avatar" on storage.objects for insert to authenticated with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "users update their own avatar" on storage.objects for update to authenticated using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text) with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
