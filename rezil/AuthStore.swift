@@ -83,16 +83,16 @@ final class AuthStore: NSObject, ObservableObject {
         return client
     }
 
-    func saveProfile(displayName: String, homeCity: String?, homeCountry: String?, avatarPath: String?) async throws {
+    func saveProfile(displayName: String, avatarPath: String?) async throws {
         let client = try await validClient()
-        profile = try await client.updateProfile(displayName: displayName, homeCity: homeCity, homeCountry: homeCountry, avatarPath: avatarPath)
+        profile = try await client.updateProfile(displayName: displayName, avatarPath: avatarPath)
     }
 
     func uploadAvatar(_ data: Data) async throws {
         let client = try await validClient()
         let path = try await client.uploadAvatar(data)
         guard let currentProfile = profile else { return }
-        profile = try await client.updateProfile(displayName: currentProfile.displayName, homeCity: currentProfile.homeCity, homeCountry: currentProfile.homeCountry, avatarPath: path)
+        profile = try await client.updateProfile(displayName: currentProfile.displayName, avatarPath: path)
     }
 
     private func restoreSession() async {
@@ -121,7 +121,7 @@ final class AuthStore: NSObject, ObservableObject {
         guard let client = client() else { isLoading = false; return }
         do {
             if let profile = try await client.fetchProfile(userID: session!.user.id) { self.profile = profile }
-            else { self.profile = try await client.upsertProfile(Profile(id: session!.user.id, displayName: session?.user.userMetadata?.fullName ?? "REZİL kullanıcısı", avatarPath: nil, homeCity: nil, reputationScore: 0, createdAt: .now)) }
+            else { self.profile = try await client.upsertProfile(Profile(id: session!.user.id, displayName: session?.user.userMetadata?.fullName ?? "REZİL kullanıcısı", avatarPath: nil, reputationScore: 0, createdAt: .now)) }
         } catch { errorMessage = error.localizedDescription }
         isLoading = false
     }

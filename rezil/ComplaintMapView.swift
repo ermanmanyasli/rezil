@@ -5,17 +5,21 @@ struct ComplaintMapView: View {
     @ObservedObject var store: ComplaintStore
     @EnvironmentObject private var auth: AuthStore
     @Binding var mapCenter: CLLocationCoordinate2D?
-    @State private var position: MapCameraPosition = .automatic
+    @Binding var position: MapCameraPosition
+    @Binding var didCenterOnLiveLocation: Bool
+    @Binding var focusedComplaintID: Complaint.ID?
     @State private var selectedComplaint: Complaint.ID?
     @State private var deletingComplaint: Complaint?
     @State private var showingDeleteConfirmation = false
     @StateObject private var liveLocation = LocationService()
+    private let defaultCenter = CLLocationCoordinate2D(latitude: 39.0, longitude: 35.0)
     let authRequiredAction: () -> Void
     let addAction: (CLLocationCoordinate2D?) -> Void
 
     var body: some View {
         ZStack(alignment: .top) {
             Map(position: $position, selection: $selectedComplaint) {
+                UserAnnotation()
                 ForEach(store.complaints.filter { CoordinateValidation.isValid($0.coordinate) }) { complaint in
                     Annotation("", coordinate: complaint.coordinate, anchor: .bottom) {
                         ComplaintPin(complaint: complaint, selected: selectedComplaint == complaint.id)
@@ -26,7 +30,7 @@ struct ComplaintMapView: View {
             }
             .mapStyle(.standard(elevation: .realistic, emphasis: .muted))
             .mapControls { MapCompass(); MapUserLocationButton() }
-            .onMapCameraChange(frequency: .continuous) { context in
+            .onMapCameraChange(frequency: .onEnd) { context in
                 guard CoordinateValidation.isValid(context.region.center) else { return }
                 mapCenter = context.region.center
             }
@@ -34,13 +38,12 @@ struct ComplaintMapView: View {
             .overlay { statusOverlay }
             HeaderView()
             .sheet(item: selectedComplaintBinding) { complaint in
-                ComplaintDetailSheet(store: store, complaint: complaint, auth: auth, authRequiredAction: authRequiredAction, deleteAction: {
+                ReportDetailSheet(store: store, complaint: complaint, canDelete: complaint.authorID == auth.profile?.id, deleteAction: {
                     deletingComplaint = complaint
                     showingDeleteConfirmation = true
-                }) {
+                }, supportAction: {
                     if auth.isAuthenticated { store.toggleSupport(for: complaint.id) } else { authRequiredAction() }
-                }
-                .presentationDetents([.medium, .large])
+                }, authRequiredAction: authRequiredAction)
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .presentationBackground(Color(.systemBackground))
@@ -48,19 +51,35 @@ struct ComplaintMapView: View {
         }
         .onAppear {
             liveLocation.requestLocation()
-            Task {
-                try? await Task.sleep(for: .seconds(1))
-                guard !liveLocation.hasResolvedLocation else { return }
-                await centerOnProfile()
+            // Focus may have been set while another tab was visible
+            // (onChange doesn't fire for a pre-existing value).
+            if focusedComplaintID != nil {
+                selectedComplaint = focusedComplaintID
+                focusedComplaintID = nil
             }
         }
         .onChange(of: liveLocation.hasResolvedLocation) { _, isResolved in
-            guard isResolved else { return }
+            guard isResolved, !didCenterOnLiveLocation else { return }
+            didCenterOnLiveLocation = true
             centerOnLiveLocation()
+        }
+        .onChange(of: focusedComplaintID) { _, focusedID in
+            guard let focusedID else { return }
+            selectedComplaint = focusedID
+            focusedComplaintID = nil
         }
         .confirmationDialog("Şikâyet silinsin mi?", isPresented: $showingDeleteConfirmation) {
             Button("Sil", role: .destructive) {
-                if let complaint = deletingComplaint { Task { try? await store.delete(complaint); selectedComplaint = nil } }
+                if let complaint = deletingComplaint {
+                    Task {
+                        do {
+                            try await store.delete(complaint)
+                            selectedComplaint = nil
+                        } catch {
+                            store.errorMessage = error.localizedDescription
+                        }
+                    }
+                }
             }
             Button("Vazgeç", role: .cancel) { }
         }
@@ -77,22 +96,20 @@ struct ComplaintMapView: View {
                 Button("Tekrar dene") { Task { await store.load() } }.buttonStyle(.borderedProminent)
             }
             .padding().background(.regularMaterial)
+        } else if !store.isLoading && store.errorMessage == nil && store.complaints.isEmpty {
+            ContentUnavailableView {
+                Label("Henüz şikâyet yok", systemImage: "map")
+            } description: { Text("İlk şikâyeti ekleyerek haritayı doldur.") } actions: {
+                Button("Şikâyet ekle") { addAction(mapCenter) }.buttonStyle(.borderedProminent)
+            }
+            .padding().background(.regularMaterial)
         }
     }
 
-    private func centerOnProfile() async {
-        guard let query = auth.profile?.displayLocation, !query.isEmpty else { return }
-        let request = MKLocalSearch.Request(); request.naturalLanguageQuery = query
-        guard let item = try? await MKLocalSearch(request: request).start().mapItems.first else { return }
-        guard !liveLocation.hasResolvedLocation else { return }
-        guard CoordinateValidation.isValid(item.placemark.coordinate) else { return }
-        position = .region(.init(center: item.placemark.coordinate, span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18)))
-    }
-
     private func centerOnLiveLocation() {
-        guard CoordinateValidation.isValid(liveLocation.coordinate) else { return }
-        position = .region(.init(center: liveLocation.coordinate, span: .init(latitudeDelta: 0.18, longitudeDelta: 0.18)))
-        mapCenter = liveLocation.coordinate
+        let coordinate = liveLocation.hasResolvedLocation && CoordinateValidation.isValid(liveLocation.coordinate) ? liveLocation.coordinate : defaultCenter
+        position = .region(.init(center: coordinate, span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+        mapCenter = coordinate
     }
 
     private var selectedComplaintBinding: Binding<Complaint?> {
@@ -103,44 +120,7 @@ struct ComplaintMapView: View {
     }
 }
 
-private struct ComplaintDetailSheet: View {
-    @ObservedObject var store: ComplaintStore
-    let complaint: Complaint
-    let auth: AuthStore
-    let authRequiredAction: () -> Void
-    let deleteAction: () -> Void
-    let supportAction: () -> Void
-    @State private var showingComments = false
 
-    var body: some View {
-        Group {
-            if showingComments {
-                ReportCommentsView(store: store, complaint: complaint, onBack: { showingComments = false })
-                    .environmentObject(auth)
-            } else {
-                ScrollView {
-                    ComplaintSheetContent(
-                        complaint: complaint,
-                        imageURLs: store.reportImageURLs(for: complaint),
-                        avatarURL: store.avatarURL(for: complaint.authorProfile?.avatarPath),
-                        canDelete: complaint.authorID == auth.profile?.id,
-                        deleteAction: deleteAction,
-                        isSupportPending: store.isSupportPending(for: complaint.id),
-                        isCommentsPending: store.isCommentPending(for: complaint.id),
-                        showCommentsAction: {
-                            if auth.isAuthenticated { showingComments = true } else { authRequiredAction() }
-                        },
-                        supportAction: supportAction
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 24)
-                }
-            }
-        }
-        .animation(.snappy, value: showingComments)
-    }
-}
 
 struct HeaderView: View {
     var body: some View {
@@ -260,7 +240,7 @@ struct ComplaintCard: View {
     }
 }
 
-private struct ComplaintSheetContent: View {
+struct ComplaintSheetContent: View {
     let complaint: Complaint
     let imageURLs: [URL]
     let avatarURL: URL?
@@ -268,7 +248,7 @@ private struct ComplaintSheetContent: View {
     let deleteAction: () -> Void
     let isSupportPending: Bool
     let isCommentsPending: Bool
-    let showCommentsAction: () -> Void
+    let scrollToCommentsAction: () -> Void
     let supportAction: () -> Void
     @State private var selectedImageIndex: Int?
 
@@ -280,7 +260,7 @@ private struct ComplaintSheetContent: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             authorHeader
             imageGallery
             actionRow
@@ -328,7 +308,7 @@ private struct ComplaintSheetContent: View {
                     .onTapGesture { selectedImageIndex = index }
                 }
             }
-            .frame(height: 220)
+            .frame(height: 170)
             .tabViewStyle(.page(indexDisplayMode: .automatic))
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
@@ -344,7 +324,7 @@ private struct ComplaintSheetContent: View {
             .disabled(isSupportPending)
             .accessibilityLabel(complaint.isSupported ? "Desteği geri al" : "Şikâyeti destekle")
 
-            Button(action: showCommentsAction) {
+            Button(action: scrollToCommentsAction) {
                 HStack(spacing: 6) {
                     if isCommentsPending { ProgressView().controlSize(.small) }
                     Label("\(complaint.commentCount)", systemImage: "bubble.left")
@@ -364,19 +344,10 @@ private struct ComplaintSheetContent: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(complaint.title)
-                .font(.title3.weight(.semibold))
+                .font(.body)
                 .foregroundStyle(.primary)
-            Label(complaint.locationName, systemImage: "mappin.and.ellipse")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(complaint.category.rawValue)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.rezilRed)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.rezilRed.opacity(0.1), in: Capsule())
         }
     }
 

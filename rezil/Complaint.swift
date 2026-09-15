@@ -107,8 +107,8 @@ struct ReportComment: Identifiable, Codable, Equatable {
         id = try c.decode(UUID.self, forKey: .id)
         reportID = try c.decode(UUID.self, forKey: .reportID)
         authorID = try c.decode(UUID.self, forKey: .authorID)
-        body = try c.decode(String.self, forKey: .body)
-        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? .distantPast
         authorProfile = try c.decodeIfPresent(Profile.self, forKey: .authorProfile)
         likeCount = try c.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
     }
@@ -136,7 +136,21 @@ extension JSONEncoder {
 extension JSONDecoder {
     static var rezil: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Supabase returns timestamptz with microsecond precision
+        // (e.g. "2026-09-10T14:23:45.123456+00:00"), which the stock
+        // .iso8601 strategy rejects. Try fractional seconds first,
+        // then fall back to plain internet date-time.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            let withFractions = ISO8601DateFormatter()
+            withFractions.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFractions.date(from: string) { return date }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let date = plain.date(from: string) { return date }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected ISO8601 date string: \(string)")
+        }
         return decoder
     }
 }

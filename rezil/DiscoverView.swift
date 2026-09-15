@@ -38,7 +38,7 @@ struct DiscoverView: View {
                         LazyVStack(spacing: 12) {
                             sortingChips
                             ForEach(sortedComplaints) { complaint in
-                                ComplaintCard(complaint: complaint, imageURLs: store.reportImageURLs(for: complaint), isSupportPending: store.isSupportPending(for: complaint.id), isCommentsPending: store.isCommentPending(for: complaint.id), showCommentsAction: { if auth.isAuthenticated { showingCommentsFor = complaint } else { authRequiredAction() } }) { if auth.isAuthenticated { store.toggleSupport(for: complaint.id) } else { authRequiredAction() } }
+                                ComplaintCard(complaint: complaint, imageURLs: store.reportThumbnailURLs(for: complaint), isSupportPending: store.isSupportPending(for: complaint.id), isCommentsPending: store.isCommentPending(for: complaint.id), showCommentsAction: { if auth.isAuthenticated { showingCommentsFor = complaint } else { authRequiredAction() } }) { if auth.isAuthenticated { store.toggleSupport(for: complaint.id) } else { authRequiredAction() } }
                             }
                         }.padding()
                     }
@@ -48,8 +48,9 @@ struct DiscoverView: View {
             }
             .navigationTitle("Çevrende gündem")
             .sheet(item: $showingCommentsFor) { complaint in
-                ReportCommentsView(store: store, complaint: complaint)
-                    .presentationDetents([.medium])
+                ReportDetailSheet(store: store, complaint: complaint, canDelete: false, deleteAction: {}, supportAction: {
+                    if auth.isAuthenticated { store.toggleSupport(for: complaint.id) } else { authRequiredAction() }
+                }, authRequiredAction: authRequiredAction, startAtComments: true)
                     .presentationDragIndicator(.visible)
                     .presentationBackground(Color(.systemBackground))
             }
@@ -142,7 +143,7 @@ struct ProfileView: View {
                         } else {
                             Image(systemName: "person.crop.circle.fill").font(.system(size: 54)).foregroundStyle(Color.rezilRed)
                         }
-                        VStack(alignment: .leading) { Text(auth.profile?.displayName ?? "REZİL kullanıcısı").font(.headline); Text(auth.profile?.displayLocation ?? "Şehir veya ülke eklenmedi").foregroundStyle(.secondary) }
+                        VStack(alignment: .leading) { Text(auth.profile?.displayName ?? "REZİL kullanıcısı").font(.headline) }
                         Spacer(); Button("Düzenle") { showEditor = true }
                     }.padding(.vertical, 8)
                 }

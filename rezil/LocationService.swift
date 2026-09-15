@@ -1,13 +1,14 @@
 import Foundation
 import CoreLocation
 import Combine
-import MapKit
 
 final class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var coordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
     @Published var locationText = "Konum belirleniyor"
     @Published private(set) var hasResolvedLocation = false
+    @Published private(set) var hasResolvedName = false
     @Published private(set) var hasError = false
+    private(set) var isManualPin = false
     private let manager = CLLocationManager()
 
     init(initialCoordinate: CLLocationCoordinate2D? = nil) {
@@ -16,12 +17,12 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.desiredAccuracy = kCLLocationAccuracyBest
         if let initialCoordinate, CoordinateValidation.isValid(initialCoordinate) {
             coordinate = initialCoordinate
-            hasResolvedLocation = true
             locationText = "Seçilen konum"
         }
     }
     func requestLocation() {
         hasError = false
+        hasResolvedName = false
         locationText = "Konum belirleniyor…"
         switch manager.authorizationStatus {
         case .notDetermined:
@@ -42,10 +43,12 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.requestLocation()
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard !isManualPin else { return }
         guard let latest = locations.last else { return }
         guard CoordinateValidation.isValid(latest.coordinate) else { return }
         coordinate = latest.coordinate
         hasResolvedLocation = true
+        hasResolvedName = false
         hasError = false
         locationText = "Adres belirleniyor…"
         resolveName(for: latest)
@@ -53,21 +56,22 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
 
     func useManualLocation(_ coordinate: CLLocationCoordinate2D) {
         guard CoordinateValidation.isValid(coordinate) else { return }
+        isManualPin = true
         self.coordinate = coordinate
         hasResolvedLocation = true
+        hasResolvedName = false
         hasError = false
         locationText = "Adres belirleniyor…"
         resolveName(for: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
     }
 
     private func resolveName(for location: CLLocation) {
-        Task { @MainActor [weak self] in
-            guard let request = MKReverseGeocodingRequest(location: location) else {
-                self?.locationText = "Seçilen konum"
-                return
+        let geocoder = CLGeocoder()
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+            DispatchQueue.main.async {
+                self?.locationText = placemarks?.first?.name ?? "Seçilen konum"
+                self?.hasResolvedName = true
             }
-            let items = try? await request.mapItems
-            self?.locationText = items?.first?.name ?? "Seçilen konum"
         }
     }
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

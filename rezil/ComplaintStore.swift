@@ -3,6 +3,11 @@ import CoreLocation
 import Foundation
 import SwiftUI
 
+/// Upload progress for a new report: resizing/compressing vs. uploading.
+enum PhotoUploadPhase {
+    case idle, preparing, uploading
+}
+
 @MainActor
 final class ComplaintStore: ObservableObject {
     @Published private(set) var complaints: [Complaint] = []
@@ -11,6 +16,8 @@ final class ComplaintStore: ObservableObject {
     @Published private(set) var commentsByReportID: [UUID: [ReportComment]] = [:]
     @Published private(set) var myReports: [Complaint] = []
     @Published private(set) var myComments: [ReportComment] = []
+    @Published private(set) var isLoadingOwned = false
+    @Published private(set) var photoPhase: PhotoUploadPhase = .idle
     @Published var errorMessage: String?
     @Published private(set) var pendingSupportIDs: Set<UUID> = []
     @Published private(set) var pendingCommentReportIDs: Set<UUID> = []
@@ -39,13 +46,26 @@ final class ComplaintStore: ObservableObject {
     }
 
     func loadOwnedContent() async {
+        errorMessage = nil
+        isLoadingOwned = true
+        defer { isLoadingOwned = false }
         do { let client = try await auth.validClient(); async let reports = client.fetchMyReports(); async let comments = client.fetchMyComments(); myReports = try await reports; myComments = try await comments }
         catch { errorMessage = error.localizedDescription }
     }
 
     func update(_ complaint: Complaint) async throws {
         let client = try await auth.validClient()
-        let updated = try await client.updateReport(complaint)
+        var updated = try await client.updateReport(complaint)
+        // The PATCH response has no author/media joins; keep the local values
+        // so images and author don't vanish from the UI after an edit.
+        if updated.authorProfile == nil {
+            updated.authorProfile = complaints.first(where: { $0.id == complaint.id })?.authorProfile
+                ?? myReports.first(where: { $0.id == complaint.id })?.authorProfile
+        }
+        if updated.imagePaths.isEmpty {
+            updated.imagePaths = complaints.first(where: { $0.id == complaint.id })?.imagePaths
+                ?? myReports.first(where: { $0.id == complaint.id })?.imagePaths ?? []
+        }
         if let i = complaints.firstIndex(where: { $0.id == complaint.id }) { complaints[i] = updated }
         if let i = myReports.firstIndex(where: { $0.id == complaint.id }) { myReports[i] = updated }
     }
@@ -58,8 +78,22 @@ final class ComplaintStore: ObservableObject {
     @discardableResult
     func add(description: String, category: ComplaintCategory, coordinate: CLLocationCoordinate2D, locationName: String, images: [Data]) async throws -> Complaint {
         let client = try await auth.validClient()
-        let complaint = try await client.createReport(description: description, category: category, coordinate: coordinate, locationName: locationName, images: images)
-        withAnimation(.spring) { complaints.insert(complaint, at: 0) }
+        // CPU-heavy JPEG work runs off the main actor; uploads stay on it.
+        photoPhase = .preparing
+        defer { photoPhase = .idle }
+        var photos: [ComplaintImageProcessor.OptimizedPhoto] = []
+        for data in images.prefix(3) {
+            photos.append(try await Task.detached(priority: .userInitiated) {
+                try ComplaintImageProcessor.optimize(data)
+            }.value)
+        }
+        photoPhase = .uploading
+        let complaint = try await client.createReport(description: description, category: category, coordinate: coordinate, locationName: locationName, photos: photos)
+        withAnimation(.spring) {
+            complaints.insert(complaint, at: 0)
+            // New reports belong to the current user; keep Katkılar in sync.
+            myReports.insert(complaint, at: 0)
+        }
         return complaint
     }
 
@@ -141,7 +175,9 @@ final class ComplaintStore: ObservableObject {
         }
     }
     func avatarURL(for path: String?) -> URL? { (auth.client() ?? auth.publicClient())?.publicAvatarURL(for: path) }
-    func reportImageURLs(for complaint: Complaint) -> [URL] { complaint.imagePaths.compactMap { (auth.client() ?? auth.publicClient())?.reportImageURL(for: $0) } }
+    func reportImageURLs(for complaint: Complaint) -> [URL] { complaint.imagePaths.compactMap { (auth.client() ?? auth.publicClient())?.resolveReportImageURL($0) } }
+    /// Small variants for map pins and feed cards (legacy URLs resolve to themselves).
+    func reportThumbnailURLs(for complaint: Complaint) -> [URL] { complaint.imagePaths.compactMap { (auth.client() ?? auth.publicClient())?.reportThumbnailURL(for: $0) } }
 
     func delete(_ comment: ReportComment) async throws {
         let client = try await auth.validClient()

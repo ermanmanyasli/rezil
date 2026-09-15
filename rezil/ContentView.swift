@@ -8,14 +8,19 @@
 import SwiftUI
 import UIKit
 import CoreLocation
+import MapKit
 
 struct ContentView: View {
     @ObservedObject var auth: AuthStore
     @StateObject private var store: ComplaintStore
     @State private var selectedTab: AppTab = .map
-    @State private var isCreatingComplaint = false
-    @State private var draftInitialCoordinate: CLLocationCoordinate2D?
+    @State private var draft: ComplaintDraft?
     @State private var mapCenter: CLLocationCoordinate2D?
+    @State private var mapPosition: MapCameraPosition = .region(
+        .init(center: CLLocationCoordinate2D(latitude: 39.0, longitude: 35.0),
+              span: .init(latitudeDelta: 18, longitudeDelta: 18)))
+    @State private var mapCenteredOnLiveLocation = false
+    @State private var focusedComplaintID: Complaint.ID?
     @State private var notice: AppNotice?
     @State private var showingAuth = false
 
@@ -29,14 +34,12 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .map:
-                    ComplaintMapView(store: store, mapCenter: $mapCenter, authRequiredAction: { showingAuth = true }) { coordinate in
-                        draftInitialCoordinate = coordinate
-                        requireAuth { isCreatingComplaint = true }
+                    ComplaintMapView(store: store, mapCenter: $mapCenter, position: $mapPosition, didCenterOnLiveLocation: $mapCenteredOnLiveLocation, focusedComplaintID: $focusedComplaintID, authRequiredAction: { showingAuth = true }) { coordinate in
+                        startComplaint(initialCoordinate: coordinate)
                     }
                 case .discover:
                     DiscoverView(store: store, authRequiredAction: { showingAuth = true }, addAction: {
-                        draftInitialCoordinate = nil
-                        requireAuth { isCreatingComplaint = true }
+                        startComplaint(initialCoordinate: nil)
                     })
                 case .contributions:
                     ContributionsView(store: store, authRequiredAction: { showingAuth = true })
@@ -46,8 +49,7 @@ struct ContentView: View {
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 78) }
 
             BottomBar(selectedTab: $selectedTab) {
-                draftInitialCoordinate = selectedTab == .map ? mapCenter : nil
-                requireAuth { isCreatingComplaint = true }
+                startComplaint(initialCoordinate: selectedTab == .map ? mapCenter : nil)
             }
 
             if let notice {
@@ -59,8 +61,20 @@ struct ContentView: View {
                     .zIndex(10)
             }
         }
-        .sheet(isPresented: $isCreatingComplaint) {
-            NewComplaintView(store: store, initialCoordinate: draftInitialCoordinate) { _ in
+        .sheet(item: $draft) { draft in
+            NewComplaintView(store: store, draft: draft) { complaint in
+                // Dismissal lives here: dismiss() inside the pushed form
+                // would only pop the navigation stack, not close the sheet.
+                self.draft = nil
+                // Show the user their latest contribution: glide the map
+                // to the new pin and open its detail sheet.
+                if CoordinateValidation.isValid(complaint.coordinate) {
+                    withAnimation(.snappy) {
+                        mapPosition = .region(.init(center: complaint.coordinate,
+                                                    span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+                    }
+                    focusedComplaintID = complaint.id
+                }
                 selectedTab = .map
                 showNotice(.success("Şikâyetin haritaya eklendi."))
             }
@@ -89,6 +103,10 @@ struct ContentView: View {
     private func requireAuth(_ action: () -> Void) {
         guard auth.isAuthenticated else { showingAuth = true; return }
         action()
+    }
+
+    private func startComplaint(initialCoordinate: CLLocationCoordinate2D?) {
+        requireAuth { draft = ComplaintDraft(initialCoordinate: initialCoordinate) }
     }
 
 

@@ -143,10 +143,10 @@ struct SupabaseClient: Sendable {
         return profile
     }
 
-    func updateProfile(displayName: String, homeCity: String?, homeCountry: String?, avatarPath: String?) async throws -> Profile {
+    func updateProfile(displayName: String, avatarPath: String?) async throws -> Profile {
         guard let userID = session?.user.id else { throw SupabaseError.notAuthenticated }
-        struct Body: Encodable { let display_name: String; let home_city: String?; let home_country: String?; let avatar_path: String? }
-        let rows: [Profile] = try await request("/rest/v1/profiles?id=eq.\(userID.uuidString)", method: "PATCH", body: Body(display_name: displayName, home_city: homeCity, home_country: homeCountry, avatar_path: avatarPath), headers: ["Prefer": "return=representation"])
+        struct Body: Encodable { let display_name: String; let avatar_path: String? }
+        let rows: [Profile] = try await request("/rest/v1/profiles?id=eq.\(userID.uuidString)", method: "PATCH", body: Body(display_name: displayName, avatar_path: avatarPath), headers: ["Prefer": "return=representation"])
         guard let profile = rows.first else { throw SupabaseError.invalidResponse }; return profile
     }
 
@@ -156,7 +156,8 @@ struct SupabaseClient: Sendable {
         var complaints = rows.map(Complaint.init)
         guard let userID = session?.user.id, !complaints.isEmpty else { return complaints }
         let ids = complaints.map { $0.id.uuidString }.joined(separator: ",")
-        let supported: [SupportedReportRow] = try await request("/rest/v1/report_support?select=report_id&user_id=eq.\(userID.uuidString)&support_type=eq.seen&report_id=in.(\(ids))", method: "GET")
+        // Support status is supplementary; its failure must not break the feed.
+        let supported: [SupportedReportRow] = (try? await request("/rest/v1/report_support?select=report_id&user_id=eq.\(userID.uuidString)&support_type=eq.seen&report_id=in.(\(ids))", method: "GET")) ?? []
         let supportedIDs = Set(supported.map(\.reportID))
         for index in complaints.indices { complaints[index].isSupported = supportedIDs.contains(complaints[index].id) }
         return complaints
@@ -210,6 +211,22 @@ struct SupabaseClient: Sendable {
     func publicAvatarURL(for path: String?) -> URL? { guard let path, !path.isEmpty else { return nil }; return endpointURL("/storage/v1/object/public/avatars/\(path)") }
     func reportImageURL(for path: String) -> URL { endpointURL("/storage/v1/object/public/report-images/\(path)") }
 
+    /// Canonical display URL for a stored value: legacy full URLs pass
+    /// through unchanged, storage paths resolve to the main asset.
+    func resolveReportImageURL(_ stored: String) -> URL? {
+        if ComplaintImageURLs.isLegacyURL(stored) { return URL(string: stored) }
+        guard !stored.isEmpty else { return nil }
+        return reportImageURL(for: stored)
+    }
+
+    /// Small variant for map pins and feed cards. Legacy full URLs have
+    /// no thumbnail variant and resolve to themselves.
+    func reportThumbnailURL(for path: String) -> URL? {
+        if ComplaintImageURLs.isLegacyURL(path) { return URL(string: path) }
+        guard let thumbPath = ComplaintImageURLs.thumbnailPath(forMainPath: path) else { return nil }
+        return reportImageURL(for: thumbPath)
+    }
+
     func addComment(reportID: UUID, body: String) async throws -> ReportComment {
         guard let userID = session?.user.id else { throw SupabaseError.notAuthenticated }
         let row = NewCommentRow(reportID: reportID, authorID: userID, body: body)
@@ -227,18 +244,32 @@ struct SupabaseClient: Sendable {
         }
     }
 
-    func createReport(description: String, category: ComplaintCategory, coordinate: CLLocationCoordinate2D, locationName: String, images: [Data]) async throws -> Complaint {
+    func createReport(description: String, category: ComplaintCategory, coordinate: CLLocationCoordinate2D, locationName: String, photos: [ComplaintImageProcessor.OptimizedPhoto]) async throws -> Complaint {
         guard let userID = session?.user.id else { throw SupabaseError.notAuthenticated }
         let row = NewReportRow(authorID: userID, description: description, categoryID: category.rawValue, latitude: coordinate.latitude, longitude: coordinate.longitude, publicLocationLabel: locationName)
         let reports: [ReportRow] = try await request("/rest/v1/reports", method: "POST", body: row, headers: ["Prefer": "return=representation"])
         guard let report = reports.first else { throw SupabaseError.invalidResponse }
         var uploadedPaths: [String] = []
-        for imageData in images.prefix(3) {
-            let path = "\(report.id.uuidString)/\(UUID().uuidString).jpg"
-            try await upload(imageData, path: path)
-            let media = NewMediaRow(reportID: report.id, uploaderID: userID, storagePath: path)
-            try await requestWithoutResponse("/rest/v1/report_media", method: "POST", body: media, headers: ["Prefer": "return=minimal"])
-            uploadedPaths.append(path)
+        var uploadedObjects: [String] = []
+        do {
+            for photo in photos.prefix(3) {
+                let photoID = UUID()
+                let path = ComplaintImageURLs.mainPath(reportID: report.id, photoID: photoID)
+                guard let thumbPath = ComplaintImageURLs.thumbnailPath(forMainPath: path) else { throw SupabaseError.invalidResponse }
+                try await upload(photo.image.jpegData, path: path)
+                uploadedObjects.append(path)
+                try await upload(photo.thumbnail.jpegData, path: thumbPath)
+                uploadedObjects.append(thumbPath)
+                let media = NewMediaRow(reportID: report.id, uploaderID: userID, storagePath: path)
+                try await requestWithoutResponse("/rest/v1/report_media", method: "POST", body: media, headers: ["Prefer": "return=minimal"])
+                uploadedPaths.append(path)
+            }
+        } catch {
+            // Never save a broken image reference: remove uploaded objects,
+            // roll back the created row, then report the failure.
+            try? await deleteStorageObjects(uploadedObjects)
+            try? await deleteReport(report.id)
+            throw error
         }
         var complaint = Complaint.init(report)
         complaint.imagePaths = uploadedPaths
@@ -262,8 +293,16 @@ struct SupabaseClient: Sendable {
         request.setValue(configuration.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(session?.accessToken ?? configuration.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("31536000", forHTTPHeaderField: "Cache-Control")
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
+    }
+
+    /// Best-effort removal of already-uploaded objects (rollback path).
+    private func deleteStorageObjects(_ paths: [String]) async throws {
+        guard !paths.isEmpty else { return }
+        struct Body: Encodable { let prefixes: [String] }
+        try await requestWithoutResponse("/storage/v1/object/report-images", method: "DELETE", body: Body(prefixes: paths))
     }
 
     private func request<T: Decodable, B: Encodable>(_ path: String, method: String, body: B? = nil, headers: [String: String] = [:], authenticated: Bool = true) async throws -> T {
@@ -347,6 +386,22 @@ private struct ReportRow: Decodable {
     let media: [MediaRow]?
 
     enum CodingKeys: String, CodingKey { case id; case authorID = "author_id"; case description; case categoryID = "category_id"; case latitude; case longitude; case publicLocationLabel = "public_location_label"; case createdAt = "created_at"; case supportCount = "support_count"; case commentCount = "comment_count"; case author; case media }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        authorID = try c.decode(UUID.self, forKey: .authorID)
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        categoryID = try c.decodeIfPresent(String.self, forKey: .categoryID) ?? ""
+        latitude = try c.decode(Double.self, forKey: .latitude)
+        longitude = try c.decode(Double.self, forKey: .longitude)
+        publicLocationLabel = try c.decodeIfPresent(String.self, forKey: .publicLocationLabel) ?? ""
+        createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? .distantPast
+        supportCount = try c.decodeIfPresent(Int.self, forKey: .supportCount) ?? 0
+        commentCount = try c.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        author = try c.decodeIfPresent(Profile.self, forKey: .author)
+        media = try c.decodeIfPresent([MediaRow].self, forKey: .media)
+    }
 }
 
 private extension Complaint {

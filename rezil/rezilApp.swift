@@ -11,6 +11,13 @@ import SwiftUI
 struct rezilApp: App {
     @StateObject private var auth = AuthStore()
     @AppStorage("has_completed_onboarding") private var hasCompletedOnboarding = false
+
+    init() {
+        // Shared HTTP cache for feed/map thumbnails so scrolling
+        // does not refetch the same images (server sends Cache-Control).
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024,
+                                    diskCapacity: 256 * 1024 * 1024)
+    }
     var body: some Scene {
         WindowGroup {
             Group {

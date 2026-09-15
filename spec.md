@@ -371,7 +371,6 @@ All identifiers should be UUIDs. All timestamps should be stored in UTC. Coordin
 - `id` — references authenticated user
 - `display_name`
 - `avatar_path`
-- `home_city` — optional, not an exact home address
 - `reputation_score` — internal/optional
 - `created_at`
 - `suspended_at` — nullable
